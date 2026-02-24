@@ -1,0 +1,22 @@
+name: ds313_trading_journal
+channels:
+  - conda-forge
+dependencies:
+  - alpaca-py
+  - black
+  - ipython
+  - matplotlib
+  - numpy
+  - pandas
+  - pyright
+  - python=3.13
+  - python-dotenv
+  - seaborn
+  - sqlite
+  - tabulate
+  - typer
+  - pip:
+    - pytz==2025.2
+    - uuid==1.30
+
+prefix: "/Users/smp/miniconda3/envs/ds313_trading_journal"
