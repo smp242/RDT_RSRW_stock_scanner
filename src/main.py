@@ -1,4 +1,5 @@
 import typer
+import pandas as pd
 from src.models.universe import STOCK_SYMBOLS, SECTOR_ETFS
 from src.models.sector_map import validate_universe
 from src.utils.data_ingestion import (
