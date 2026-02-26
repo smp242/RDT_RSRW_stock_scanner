@@ -8,7 +8,7 @@ import logging
 
 import pandas as pd
 
-from src.utils.logger import STOCK_DIR, SECTOR_DIR, REPORT_DIR
+from src.utils.logger import STOCK_DIR, SECTOR_DIR, REPORT_DIR, STRONG_DIR, WEAK_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,6 @@ def _load_all_scans(scan_dir: Path) -> pd.DataFrame:
     dfs = [pd.read_csv(f) for f in files]
     combined = pd.concat(dfs, ignore_index=True)
 
-    # Ensure scan_date is a proper date for sorting/grouping
     if "scan_date" in combined.columns:
         combined["scan_date"] = pd.to_datetime(combined["scan_date"], format="%Y%m%d")
 
@@ -223,3 +222,134 @@ def stock_ranking_report() -> pd.DataFrame:
     logger.info(f"Stock ranking history → {out_path}")
 
     return pivot
+
+
+# -------------------------
+# Watchlist Frequency Reports
+# -------------------------
+
+def watchlist_frequency_report(n: int = 10) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Analyze which stocks appear most/least often on the strong and weak lists.
+
+    Returns
+    -------
+    (strong_freq, weak_freq) — DataFrames sorted by appearance count.
+    """
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+    strong_freq = _build_frequency("strong", STRONG_DIR, n)
+    weak_freq   = _build_frequency("weak", WEAK_DIR, n)
+
+    return strong_freq, weak_freq
+
+
+def _build_frequency(list_type: str, scan_dir: Path, n: int) -> pd.DataFrame:
+    """Build frequency + consistency stats for a watchlist type."""
+
+    raw = _load_all_scans(scan_dir)
+    if raw.empty:
+        logger.warning(f"No {list_type} watchlist files found.")
+        return pd.DataFrame()
+
+    # Keep only latest scan per day
+    daily = _latest_per_day(raw)
+
+    total_days = daily["scan_date"].nunique()
+    if total_days == 0:
+        return pd.DataFrame()
+
+    # --- Appearance count ---
+    appearances = (
+        daily.groupby("symbol")["scan_date"]
+        .nunique()
+        .reset_index()
+        .rename(columns={"scan_date": "days_on_list"})
+    )
+    appearances["total_scan_days"] = total_days
+    appearances["pct_days"] = (
+        (appearances["days_on_list"] / total_days * 100).round(1)
+    )
+
+    # --- Average rank when on list ---
+    avg_rank = (
+        daily.groupby("symbol")["rank"]
+        .mean()
+        .reset_index()
+        .rename(columns={"rank": "avg_rank"})
+    )
+    avg_rank["avg_rank"] = avg_rank["avg_rank"].round(1)
+
+    # --- Average composite score ---
+    avg_score = (
+        daily.groupby("symbol")["composite_score"]
+        .mean()
+        .reset_index()
+        .rename(columns={"composite_score": "avg_score"})
+    )
+    avg_score["avg_score"] = avg_score["avg_score"].round(4)
+
+    # --- Best / worst rank ---
+    best_rank = (
+        daily.groupby("symbol")["rank"]
+        .min()
+        .reset_index()
+        .rename(columns={"rank": "best_rank"})
+    )
+
+    # --- Streak: consecutive most recent days on list ---
+    streaks = _compute_streaks(daily)
+
+    # --- Sector ---
+    sectors = (
+        daily.groupby("symbol")["sector"]
+        .first()
+        .reset_index()
+    )
+
+    # --- Merge ---
+    freq = (
+        appearances
+        .merge(avg_rank, on="symbol")
+        .merge(avg_score, on="symbol")
+        .merge(best_rank, on="symbol")
+        .merge(streaks, on="symbol", how="left")
+        .merge(sectors, on="symbol", how="left")
+        .sort_values("days_on_list", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    # Reorder columns
+    col_order = [
+        "symbol", "sector", "days_on_list", "total_scan_days",
+        "pct_days", "current_streak", "avg_rank", "best_rank",
+        "avg_score",
+    ]
+    freq = freq[[c for c in col_order if c in freq.columns]]
+
+    out_path = REPORT_DIR / f"watchlist_{list_type}_frequency.csv"
+    freq.to_csv(out_path, index=False)
+    logger.info(f"{list_type.capitalize()} frequency report → {out_path}")
+
+    return freq
+
+
+def _compute_streaks(daily: pd.DataFrame) -> pd.DataFrame:
+    """
+    For each symbol, compute how many consecutive recent scan days
+    it has appeared on the list (current streak).
+    """
+    dates = sorted(daily["scan_date"].unique(), reverse=True)
+    streak_data = []
+
+    for symbol in daily["symbol"].unique():
+        sym_dates = set(daily[daily["symbol"] == symbol]["scan_date"])
+        streak = 0
+        for d in dates:
+            if d in sym_dates:
+                streak += 1
+            else:
+                break
+        streak_data.append({"symbol": symbol, "current_streak": streak})
+
+    return pd.DataFrame(streak_data)

@@ -156,6 +156,7 @@ def get_weekly_batch(
         end=end,
     )
 
+
 def get_hourly_batch(
     symbols: List[str],
     trading_days: int = 30,
@@ -173,3 +174,42 @@ def get_hourly_batch(
         start=start,
         end=end,
     )
+
+
+def get_15m_batch(
+    symbols: List[str],
+    trading_days: int = 5,
+) -> Dict[str, pd.DataFrame]:
+    """
+    Fetch 15-minute bars.
+    ~26 bars per trading day, so 5 days ≈ 130 bars.
+    """
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=int(trading_days * 1.5))
+
+    return _fetch_bars(
+        symbols=symbols,
+        timeframe=TimeFrame(amount=15, unit=TimeFrameUnit.Minute),  # pyright: ignore[reportArgumentType]
+        start=start,
+        end=end,
+    )
+
+
+def get_5m_batch(
+    symbols: List[str],
+    trading_days: int = 2,
+) -> Dict[str, pd.DataFrame]:
+    """
+    Fetch 5-minute bars.
+    ~78 bars per trading day, so 2 days ≈ 156 bars.
+    """
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=int(trading_days * 1.5))
+
+    return _fetch_bars(
+        symbols=symbols,
+        timeframe=TimeFrame(amount=5, unit=TimeFrameUnit.Minute),  # pyright: ignore[reportArgumentType]
+        start=start,
+        end=end,
+    )
+

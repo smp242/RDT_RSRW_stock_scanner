@@ -1,0 +1,65 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# -------------------------
+# Virtual environment
+# -------------------------
+.venv/
+venv/
+env/
+
+# -------------------------
+# Environment / secrets
+# -------------------------
+.env
+.env.*
+!.env.example
+
+# -------------------------
+# IDE
+# -------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# -------------------------
+# Data (scan results + reports)
+# -------------------------
+data/scans/
+data/reports/
+data/logs/
+
+# -------------------------
+# Jupyter (if you ever explore)
+# -------------------------
+.ipynb_checkpoints/
+
+# -------------------------
+# Testing / coverage
+# -------------------------
+.pytest_cache/
+.coverage
+htmlcov/
+
+# -------------------------
+# mypy / pyright
+# -------------------------
+.mypy_cache/
+.pyright/
+
+# -------------------------
+# Misc
+# -------------------------
+changes_log.md
