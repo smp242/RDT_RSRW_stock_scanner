@@ -37,9 +37,7 @@ env/
 # -------------------------
 # Data (scan results + reports)
 # -------------------------
-data/scans/
-data/reports/
-data/logs/
+*.csv
 
 # -------------------------
 # Jupyter (if you ever explore)
