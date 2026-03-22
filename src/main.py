@@ -1,3 +1,20 @@
+import logging
+from pathlib import Path
+
+# Configure logging before any submodule imports run.
+# WARNING+ goes to stderr (visible in the terminal); DEBUG+ goes to the log file.
+_log_dir = Path(__file__).parent.parent / "data" / "logs"
+_log_dir.mkdir(parents=True, exist_ok=True)
+_file_handler = logging.FileHandler(_log_dir / "scanner.log")
+_file_handler.setLevel(logging.DEBUG)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(name)s — %(message)s"))
+_console_handler = logging.StreamHandler()
+_console_handler.setLevel(logging.WARNING)
+_console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+logging.basicConfig(level=logging.DEBUG, handlers=[_file_handler, _console_handler])
+
+from typing import Optional
+
 import typer
 import pandas as pd
 from src.models.universe import STOCK_SYMBOLS, SECTOR_ETFS
@@ -11,7 +28,10 @@ from src.utils.spot_engine import spot_scan_symbol, spot_scan_universe
 from src.utils.logger import (
     log_scan, log_watchlists,
     log_spot_universe, log_spot_single,
+    log_iv_daily, load_iv_history,
 )
+from src.utils.iv_ingestion import get_iv_universe
+from src.utils.iv_engine import compute_universe_iv_metrics
 from src.utils.reports import (
     sector_trend_report,
     sector_change_report,
@@ -19,8 +39,25 @@ from src.utils.reports import (
     stock_ranking_report,
     watchlist_frequency_report,
 )
+from src.utils.charts import generate_all_charts
 
 app = typer.Typer()
+
+
+def _inject_spy(
+    target_daily: dict,
+    target_weekly: dict,
+    target_hourly: Optional[dict],
+    data_daily: dict,
+    data_weekly: dict,
+    data_hourly: Optional[dict],
+) -> None:
+    """Inject SPY into a sub-dict so the scoring engine has the benchmark."""
+    if "SPY" in data_daily:
+        target_daily["SPY"] = data_daily["SPY"]
+        target_weekly["SPY"] = data_weekly["SPY"]
+        if data_hourly is not None and target_hourly is not None and "SPY" in data_hourly:
+            target_hourly["SPY"] = data_hourly["SPY"]
 
 
 @app.command()
@@ -30,7 +67,7 @@ def scan(
     weeks: int = typer.Option(26, help="Lookback for weekly bars"),
     hourly_days: int = typer.Option(30, help="Lookback trading days for hourly bars"),
     no_hourly: bool = typer.Option(False, help="Skip hourly data fetch"),
-    sector: str = typer.Option(None, help="Filter to a sector ETF (e.g. XLK)"),
+    sector: Optional[str] = typer.Option(None, help="Filter to a sector ETF (e.g. XLK)"),
 ):
     """Pull fresh data and score the universe."""
 
@@ -59,27 +96,13 @@ def scan(
 
     sector_daily  = {s: data_daily[s]  for s in SECTOR_ETFS if s in data_daily}
     sector_weekly = {s: data_weekly[s] for s in SECTOR_ETFS if s in data_weekly}
-    sector_hourly = None
-    if data_hourly:
-        sector_hourly = {s: data_hourly[s] for s in SECTOR_ETFS if s in data_hourly}
-
-    if "SPY" in data_daily:
-        sector_daily["SPY"]  = data_daily["SPY"]
-        sector_weekly["SPY"] = data_weekly["SPY"]
-        if data_hourly is not None and sector_hourly is not None and "SPY" in data_hourly:
-            sector_hourly["SPY"] = data_hourly["SPY"]
+    sector_hourly = {s: data_hourly[s] for s in SECTOR_ETFS if s in data_hourly} if data_hourly else None
+    _inject_spy(sector_daily, sector_weekly, sector_hourly, data_daily, data_weekly, data_hourly)
 
     stock_daily  = {s: data_daily[s]  for s in STOCK_SYMBOLS if s in data_daily}
     stock_weekly = {s: data_weekly[s] for s in STOCK_SYMBOLS if s in data_weekly}
-    stock_hourly = None
-    if data_hourly:
-        stock_hourly = {s: data_hourly[s] for s in STOCK_SYMBOLS if s in data_hourly}
-
-    if "SPY" in data_daily:
-        stock_daily["SPY"]  = data_daily["SPY"]
-        stock_weekly["SPY"] = data_weekly["SPY"]
-        if data_hourly is not None and stock_hourly is not None and "SPY" in data_hourly:
-            stock_hourly["SPY"] = data_hourly["SPY"]
+    stock_hourly = {s: data_hourly[s] for s in STOCK_SYMBOLS if s in data_hourly} if data_hourly else None
+    _inject_spy(stock_daily, stock_weekly, stock_hourly, data_daily, data_weekly, data_hourly)
 
     sector_df = compute_stock_rs(sector_daily, sector_weekly, sector_hourly)
     stock_df  = compute_stock_rs(stock_daily, stock_weekly, stock_hourly)
@@ -124,8 +147,8 @@ def scan(
 
 @app.command()
 def spot(
-    symbol: str = typer.Argument(None, help="Single ticker (e.g. NVDA). Omit for full universe."),
-    sector: str = typer.Option(None, help="Filter universe to a sector ETF"),
+    symbol: Optional[str] = typer.Argument(None, help="Single ticker (e.g. NVDA). Omit for full universe."),
+    sector: Optional[str] = typer.Option(None, help="Filter universe to a sector ETF"),
 ):
     """Intraday momentum spot check — single symbol or full universe."""
 
@@ -319,6 +342,195 @@ def report_watchlists(
         typer.echo(weak_freq.head(top_n).to_string(index=False))
     else:
         typer.echo("No weak watchlist data yet.")
+
+
+@app.command()
+def iv_scan(
+    top_n: int = typer.Option(10, help="Number of elevated-IV candidates to display"),
+    no_log: bool = typer.Option(False, help="Skip logging IV history (dry run)"),
+):
+    """
+    Fetch IV snapshots, compute IVR/IV percentile/IV-HV ratio, assess VIX environment.
+
+    Run this daily to build IV history. Signal quality improves with 120+ days logged.
+    """
+    symbols = list(set(STOCK_SYMBOLS + ["SPY"]))
+
+    typer.echo(f"Fetching daily bars for HV computation ({len(symbols)} symbols)...")
+    data_daily = get_daily_batch(symbols, trading_days=300)  # need 252+ for HV-252d
+
+    if not data_daily:
+        typer.echo("ERROR: No price data returned. Check API keys / network.")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Fetching IV snapshots ({len(STOCK_SYMBOLS)} stocks + SPY)...")
+    iv_snapshots = get_iv_universe(symbols)
+
+    if not iv_snapshots:
+        typer.echo("ERROR: No IV snapshots returned. Check Alpaca options data access.")
+        raise typer.Exit(code=1)
+
+    typer.echo("Computing IV metrics...")
+    vix_env, iv_df = compute_universe_iv_metrics(iv_snapshots, data_daily, load_iv_history)
+
+    # --- VIX environment ---
+    typer.echo(f"\n=== Market Environment (VIX Proxy) ===")
+    typer.echo(f"  SPY IV:       {vix_env['spy_iv']:.4f}  ({vix_env['vix_proxy']:.1f} VIX-equivalent)")
+    typer.echo(f"  Environment:  {vix_env['environment'].upper()}")
+    typer.echo(f"  Trade OK:     {vix_env['trade_ok']}")
+    typer.echo(f"  Note:         {vix_env['note']}")
+
+    if not no_log:
+        typer.echo("\nLogging IV history...")
+        hist_dir, scan_path = log_iv_daily(iv_snapshots, iv_df if not iv_df.empty else None)
+        typer.echo(f"  → history: {hist_dir}")
+        if scan_path:
+            typer.echo(f"  → snapshot: {scan_path}")
+
+    if iv_df.empty:
+        typer.echo("\nNo IV metrics computed.")
+        raise typer.Exit()
+
+    # --- Elevated candidates ---
+    elevated = iv_df[iv_df["elevated"] == True]
+
+    display_cols = [
+        "symbol", "current_iv", "iv_percentile", "iv_rank",
+        "iv_hv_ratio_20d", "hv_20d", "signal_quality", "spread_ok",
+    ]
+    display_cols = [c for c in display_cols if c in iv_df.columns]
+
+    typer.echo(f"\n=== Elevated IV Candidates ({len(elevated)} / {len(iv_df)}) ===")
+    if elevated.empty:
+        typer.echo("  None — no stocks pass all three filters right now.")
+        if not vix_env["trade_ok"]:
+            typer.echo("  (Environment gate is STANDBY — systemic vol is masking signal)")
+    else:
+        typer.echo(elevated[display_cols].head(top_n).to_string(index=False))
+
+    typer.echo(f"\n=== Top {top_n} by IV Percentile (all stocks) ===")
+    typer.echo(iv_df[display_cols].head(top_n).to_string(index=False))
+
+
+@app.command()
+def charts():
+    """Generate sector RRG, sector heatmap, and stock snapshot charts."""
+    typer.echo("Generating charts from scan history...")
+    paths = generate_all_charts()
+    if not paths:
+        typer.echo("No charts generated — run 'scan' first to build history.")
+        raise typer.Exit(code=1)
+    typer.echo(f"\nGenerated {len(paths)} chart(s):")
+    for p in paths:
+        typer.echo(f"  → {p}")
+
+
+@app.command()
+def daily(
+    top_n: int = typer.Option(10, help="Top/bottom N for watchlists and IV candidates"),
+    no_hourly: bool = typer.Option(False, help="Skip hourly data fetch"),
+    no_iv: bool = typer.Option(False, help="Skip IV scan"),
+    no_charts: bool = typer.Option(False, help="Skip chart generation"),
+):
+    """
+    Full daily pipeline: scan → iv-scan → charts in one command.
+
+    This is what the LaunchAgent calls. Can also be run manually after close.
+    """
+    errors: list[str] = []
+
+    # --- RS scan ---
+    typer.echo("\n" + "="*60)
+    typer.echo("STEP 1/3: Relative Strength Scan")
+    typer.echo("="*60)
+    # Call the underlying logic directly to avoid subprocess overhead
+    unmapped = validate_universe(STOCK_SYMBOLS)
+    if unmapped:
+        typer.echo(f"WARNING: no sector mapping for {unmapped}")
+
+    all_symbols = list(set(STOCK_SYMBOLS + SECTOR_ETFS))
+
+    typer.echo("Fetching daily bars...")
+    data_daily = get_daily_batch(all_symbols, trading_days=300)
+
+    typer.echo("Fetching weekly bars...")
+    data_weekly = get_weekly_batch(all_symbols, weeks=26)
+
+    data_hourly = None
+    if not no_hourly:
+        typer.echo("Fetching hourly bars...")
+        data_hourly = get_hourly_batch(all_symbols, trading_days=30)
+
+    if not data_daily or not data_weekly:
+        typer.echo("ERROR: No price data. Aborting.")
+        raise typer.Exit(code=1)
+
+    sector_daily  = {s: data_daily[s]  for s in SECTOR_ETFS if s in data_daily}
+    sector_weekly = {s: data_weekly[s] for s in SECTOR_ETFS if s in data_weekly}
+    sector_hourly = {s: data_hourly[s] for s in SECTOR_ETFS if s in data_hourly} if data_hourly else None
+    _inject_spy(sector_daily, sector_weekly, sector_hourly, data_daily, data_weekly, data_hourly)
+
+    stock_daily  = {s: data_daily[s]  for s in STOCK_SYMBOLS if s in data_daily}
+    stock_weekly = {s: data_weekly[s] for s in STOCK_SYMBOLS if s in data_weekly}
+    stock_hourly = {s: data_hourly[s] for s in STOCK_SYMBOLS if s in data_hourly} if data_hourly else None
+    _inject_spy(stock_daily, stock_weekly, stock_hourly, data_daily, data_weekly, data_hourly)
+
+    sector_df = compute_stock_rs(sector_daily, sector_weekly, sector_hourly)
+    stock_df  = compute_stock_rs(stock_daily, stock_weekly, stock_hourly)
+
+    scan_meta = {"trading_days": 300, "weeks": 26, "no_hourly": no_hourly}
+    log_scan(sector_df, scan_type="sector", metadata=scan_meta)
+    log_scan(stock_df,  scan_type="stock",  metadata=scan_meta)
+    log_watchlists(stock_df, n=top_n, metadata=scan_meta)
+    typer.echo("RS scan logged.")
+
+    # --- IV scan ---
+    if not no_iv:
+        typer.echo("\n" + "="*60)
+        typer.echo("STEP 2/3: IV Scan")
+        typer.echo("="*60)
+        try:
+            iv_symbols = list(set(STOCK_SYMBOLS + ["SPY"]))
+            iv_snapshots = get_iv_universe(iv_symbols)
+            if iv_snapshots:
+                _, iv_df = compute_universe_iv_metrics(iv_snapshots, data_daily, load_iv_history)
+                log_iv_daily(iv_snapshots, iv_df if not iv_df.empty else None)
+                elevated_count = int(iv_df["elevated"].sum()) if not iv_df.empty else 0
+                typer.echo(f"IV scan logged. Elevated candidates: {elevated_count}")
+            else:
+                typer.echo("WARNING: No IV snapshots returned — skipping IV log.")
+                errors.append("iv-scan: no snapshots")
+        except Exception as e:
+            typer.echo(f"WARNING: IV scan failed — {e}")
+            errors.append(f"iv-scan: {e}")
+    else:
+        typer.echo("\nSTEP 2/3: IV Scan — skipped (--no-iv)")
+
+    # --- Charts ---
+    if not no_charts:
+        typer.echo("\n" + "="*60)
+        typer.echo("STEP 3/3: Charts")
+        typer.echo("="*60)
+        try:
+            paths = generate_all_charts()
+            typer.echo(f"Generated {len(paths)} chart(s).")
+            for p in paths:
+                typer.echo(f"  → {p}")
+        except Exception as e:
+            typer.echo(f"WARNING: Charts failed — {e}")
+            errors.append(f"charts: {e}")
+    else:
+        typer.echo("\nSTEP 3/3: Charts — skipped (--no-charts)")
+
+    # --- Summary ---
+    typer.echo("\n" + "="*60)
+    if errors:
+        typer.echo(f"Daily pipeline complete with {len(errors)} warning(s):")
+        for err in errors:
+            typer.echo(f"  ! {err}")
+    else:
+        typer.echo("Daily pipeline complete. All steps OK.")
+    typer.echo("="*60)
 
 
 if __name__ == "__main__":

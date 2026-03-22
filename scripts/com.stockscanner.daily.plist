@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+    <!-- Identity -->
+    <key>Label</key>
+    <string>com.stockscanner.daily</string>
+
+    <!-- What to run -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/smp/Documents/0_GitHub/2_stock_scanner/scripts/run_daily.sh</string>
+    </array>
+
+    <!--
+        Schedule: weekdays at 21:30 UTC (4:30 PM ET standard / 5:30 PM ET DST).
+        The shell script has a weekend guard too, so Saturday/Sunday jobs no-op.
+        Adjust Hour to 20 during EDT (Mar–Nov) if you want closer to 4:30 PM ET.
+    -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>21</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <!-- Redirect stdout/stderr to the project log -->
+    <key>StandardOutPath</key>
+    <string>/Users/smp/Documents/0_GitHub/2_stock_scanner/data/logs/launchd_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/smp/Documents/0_GitHub/2_stock_scanner/data/logs/launchd_stderr.log</string>
+
+    <!-- Run even if the scheduled time was missed (e.g. machine was asleep) -->
+    <key>RunAtLoad</key>
+    <false/>
+
+</dict>
+</plist>

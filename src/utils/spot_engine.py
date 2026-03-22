@@ -15,10 +15,10 @@ import pandas as pd
 import logging
 
 from src.models.sector_map import SECTOR_MAP
+from src.models.universe import BENCHMARK
+from src.utils.rs_engine import sign
 
 logger = logging.getLogger(__name__)
-
-BENCHMARK = "SPY"
 
 
 # -------------------------
@@ -54,20 +54,6 @@ def compute_atr(df: pd.DataFrame, lookback: int = 14) -> float:
 # -------------------------
 # Range Consumed
 # -------------------------
-
-def compute_range_consumed(df: pd.DataFrame, atr: float) -> float:
-    """
-    How much of the expected range (ATR) has been consumed today/this period.
-    (current_price - period_low) / ATR
-    """
-    if pd.isna(atr) or atr == 0 or df.empty:
-        return np.nan
-
-    current = float(df["close"].iloc[-1])
-    period_low = float(df["low"].iloc[-1]) if len(df) == 1 else float(df["low"].min())
-
-    return float((current - period_low) / atr)
-
 
 def compute_daily_range_consumed(daily_df: pd.DataFrame, daily_atr: float) -> float:
     """Range consumed for the most recent trading day."""
@@ -187,12 +173,6 @@ W_15M = 0.30
 W_5M  = 0.20
 
 
-def _sign(x: float) -> int:
-    if pd.isna(x):
-        return 0
-    return 1 if x > 0 else (-1 if x < 0 else 0)
-
-
 # -------------------------
 # Single Symbol Spot Scan
 # -------------------------
@@ -276,11 +256,11 @@ def spot_scan_symbol(
     # --- Bias alignment ---
     biases = []
     if h1 is not None:
-        biases.append(_sign(h1["rs"]))
+        biases.append(sign(h1["rs"]))
     if m15 is not None:
-        biases.append(_sign(m15["rs"]))
+        biases.append(sign(m15["rs"]))
     if m5 is not None:
-        biases.append(_sign(m5["rs"]))
+        biases.append(sign(m5["rs"]))
 
     aligned = len(set(biases)) == 1 and 0 not in biases and len(biases) > 0
 
@@ -318,7 +298,7 @@ def spot_scan_symbol(
 
         # Composite
         "intraday_composite": intraday_composite,
-        "intraday_bias": _sign(intraday_composite),
+        "intraday_bias": sign(intraday_composite),
         "intraday_aligned": aligned,
 
         # Levels

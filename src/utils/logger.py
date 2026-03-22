@@ -14,18 +14,20 @@ logger = logging.getLogger(__name__)
 #   │   └── sectors/
 #   ├── spot/
 #   │   ├── universe/
-#   │   │   ├── spot_universe_20260225_143022_a1b2c3d4.csv
-#   │   │   └── ...
 #   │   └── singles/
-#   │       ├── NVDA_20260225_143022_a1b2c3d4.csv
-#   │       └── ...
+#   ├── iv/
+#   │   ├── history/         ← per-symbol daily IV log (append mode)
+#   │   │   ├── AAPL.csv
+#   │   │   └── ...
+#   │   └── scans/           ← point-in-time IV metrics snapshots
+#   │       └── iv_scan_YYYYMMDD_uuid.csv
 #   ├── watchlists/
 #   │   ├── strong/
 #   │   └── weak/
 #   ├── reports/
 #   └── logs/
 
-BASE_DIR     = Path("data")
+BASE_DIR     = Path(__file__).parent.parent.parent / "data"
 STOCK_DIR    = BASE_DIR / "scans" / "stocks"
 SECTOR_DIR   = BASE_DIR / "scans" / "sectors"
 REPORT_DIR   = BASE_DIR / "reports"
@@ -33,6 +35,8 @@ STRONG_DIR   = BASE_DIR / "watchlists" / "strong"
 WEAK_DIR     = BASE_DIR / "watchlists" / "weak"
 SPOT_UNI_DIR = BASE_DIR / "spot" / "universe"
 SPOT_SYM_DIR = BASE_DIR / "spot" / "singles"
+IV_HIST_DIR  = BASE_DIR / "iv" / "history"
+IV_SCAN_DIR  = BASE_DIR / "iv" / "scans"
 
 MODEL_VERSION = "v1.3_zscore_3tf"
 
@@ -231,3 +235,83 @@ def log_spot_single(
 
     logger.info(f"Logged spot scan for {symbol} → {filename}")
     return filename
+
+
+def log_iv_daily(
+    iv_snapshots: dict,
+    iv_metrics: pd.DataFrame | None = None,
+) -> tuple[Path, Path | None]:
+    """
+    Append today's IV reading to each symbol's history file, and
+    optionally write a full metrics snapshot for point-in-time analysis.
+
+    Parameters
+    ----------
+    iv_snapshots : {symbol: snapshot_dict} from iv_ingestion
+    iv_metrics   : DataFrame from iv_engine.compute_universe_iv_metrics (optional)
+
+    Returns
+    -------
+    (history_dir, scan_path_or_None)
+    """
+    IV_HIST_DIR.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now(timezone.utc)
+    scan_date = now.strftime("%Y%m%d")
+    scan_timestamp = now.strftime("%Y%m%d_%H%M%S")
+    scan_uuid = uuid.uuid4().hex[:8]
+
+    # --- Append daily IV reading to per-symbol history files ---
+    for symbol, snap in iv_snapshots.items():
+        hist_file = IV_HIST_DIR / f"{symbol}.csv"
+        row = pd.DataFrame([{
+            "date": scan_date,
+            "iv":   snap["iv"],
+        }])
+        row.to_csv(
+            hist_file,
+            mode="a",
+            header=not hist_file.exists(),
+            index=False,
+        )
+
+    logger.info(f"Appended IV history for {len(iv_snapshots)} symbols → {IV_HIST_DIR}")
+
+    # --- Optional: write full metrics snapshot ---
+    scan_path = None
+    if iv_metrics is not None and not iv_metrics.empty:
+        IV_SCAN_DIR.mkdir(parents=True, exist_ok=True)
+        df = iv_metrics.copy()
+        df["scan_date"] = scan_date
+        df["scan_timestamp"] = scan_timestamp
+        df["scan_uuid"] = scan_uuid
+        df["model_version"] = MODEL_VERSION
+        scan_path = IV_SCAN_DIR / f"iv_scan_{scan_timestamp}_{scan_uuid}.csv"
+        df.to_csv(scan_path, index=False)
+        logger.info(f"Logged IV scan snapshot → {scan_path}")
+
+    return IV_HIST_DIR, scan_path
+
+
+def load_iv_history(symbol: str) -> pd.DataFrame:
+    """
+    Load a symbol's daily IV history from its CSV file.
+
+    Returns a DataFrame with columns ['date', 'iv'], sorted oldest-first.
+    Returns an empty DataFrame if no history exists yet.
+
+    This is the callable passed as iv_history_loader to
+    iv_engine.compute_universe_iv_metrics().
+    """
+    hist_file = IV_HIST_DIR / f"{symbol}.csv"
+    if not hist_file.exists():
+        return pd.DataFrame(columns=["date", "iv"])
+
+    try:
+        df = pd.read_csv(hist_file, parse_dates=["date"])
+        df = df.dropna(subset=["iv"])
+        df = df.sort_values("date").reset_index(drop=True)
+        return df[["date", "iv"]]
+    except Exception as e:
+        logger.warning(f"Could not load IV history for {symbol}: {e}")
+        return pd.DataFrame(columns=["date", "iv"])

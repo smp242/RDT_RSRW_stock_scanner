@@ -24,6 +24,9 @@ SECTOR_MAP: dict[str, str] = {
     "NOW": "XLK",
     "SHOP": "XLK",
     "PLTR": "XLK",
+    "MU": "XLK",    # Micron — memory/semiconductor, high OI
+    "PANW": "XLK",  # Palo Alto Networks — cybersecurity, high OI
+    "MSTR": "XLK",  # Strategy/MicroStrategy — BTC proxy, extreme options activity
 
     # Communication Services (XLC)
     "GOOGL": "XLC",
@@ -45,6 +48,11 @@ SECTOR_MAP: dict[str, str] = {
     "BKNG": "XLY",
     "NKE": "XLY",
     "SBUX": "XLY",
+    "UBER": "XLY",  # Uber — high OI, large cap
+    "ABNB": "XLY",  # Airbnb — high OI, earnings vol
+    "RCL": "XLY",   # Royal Caribbean — leisure/travel, high OI
+    "GM": "XLY",    # General Motors — high OI, EV narrative
+    "F": "XLY",     # Ford — highest avg daily options contracts
 
     # Financials (XLF)
     "JPM": "XLF",
@@ -63,6 +71,11 @@ SECTOR_MAP: dict[str, str] = {
     "CME": "XLF",
     "AON": "XLF",
     "MMC": "XLF",
+    "V": "XLF",     # Visa — $620B, high OI
+    "MA": "XLF",    # Mastercard — $480B, high OI
+    "SCHW": "XLF",  # Charles Schwab — high OI, options-centric business
+    "PYPL": "XLF",  # PayPal — high retail options activity
+    "COIN": "XLF",  # Coinbase — crypto proxy, very high OI
 
     # Healthcare (XLV)
     "LLY": "XLV",
@@ -92,7 +105,6 @@ SECTOR_MAP: dict[str, str] = {
     "COP": "XLE",
     "EOG": "XLE",
     "SLB": "XLE",
-    "PXD": "XLE",
     "MPC": "XLE",
 
     # Industrials (XLI)
@@ -111,6 +123,7 @@ SECTOR_MAP: dict[str, str] = {
     "ETN": "XLI",
     "WM": "XLI",
     "EMR": "XLI",
+    "DAL": "XLI",   # Delta Air Lines — highest OI airline, earnings-driven
 
     # Consumer Staples (XLP)
     "PG": "XLP",

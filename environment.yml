@@ -8,15 +8,13 @@ dependencies:
   - matplotlib
   - numpy
   - pandas
+  - pytest
   - pyright
   - python=3.13
   - python-dotenv
   - seaborn
-  - sqlite
-  - tabulate
   - typer
   - pip:
     - pytz==2025.2
-    - uuid==1.30
 
 prefix: "/Users/smp/miniconda3/envs/ds313_trading_journal"

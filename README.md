@@ -30,20 +30,25 @@ Built for systematic daily tracking and intraday momentum spot checks.
 - **Universe rankings** — wide-format pivot of all scores over time
 - **Watchlist frequency** — which stocks appear most often on strong/weak lists, streak tracking
 
+### Charts
+- **Sector RRG** — rotation scatter with trailing paths across Leading / Weakening / Lagging / Improving quadrants
+- **Sector heatmap** — score × date grid with daily rank annotations
+- **Stock snapshot** — full universe RS bar chart, coloured by sector
+
 ---
 
 ## Universe
 
-~110 US-listed stocks with market cap > $200B across all 11 GICS sectors, plus 11 sector ETFs and SPY as benchmark.
+131 US-listed large caps selected for high options open interest and activity, across all 11 GICS sectors, plus 11 sector ETFs and SPY as benchmark. Market cap generally >$40B, with emphasis on options liquidity.
 
 | Sector | ETF | Example Holdings |
 |--------|-----|-----------------|
-| Technology | XLK | AAPL, MSFT, NVDA, AVGO, AMD |
-| Financials | XLF | JPM, GS, BLK, MS, BAC |
+| Technology | XLK | AAPL, MSFT, NVDA, AVGO, AMD, MU, PANW, MSTR |
+| Financials | XLF | JPM, GS, BLK, MS, BAC, V, MA, SCHW, PYPL, COIN |
 | Healthcare | XLV | LLY, UNH, JNJ, ABBV, MRK |
 | Energy | XLE | XOM, CVX, COP, SLB |
-| Consumer Discretionary | XLY | AMZN, TSLA, HD, MCD |
-| Industrials | XLI | CAT, GE, RTX, HON, DE |
+| Consumer Discretionary | XLY | AMZN, TSLA, HD, MCD, UBER, ABNB, RCL, GM, F |
+| Industrials | XLI | CAT, GE, RTX, HON, DE, DAL |
 | Communication Services | XLC | GOOGL, META, NFLX, DIS |
 | Consumer Staples | XLP | PG, COST, KO, WMT, PEP |
 | Utilities | XLU | NEE, SO, DUK, CEG |
@@ -125,6 +130,18 @@ python -m src.main report-rankings
 python -m src.main report-watchlists
 ```
 
+### Charts
+
+```bash
+# Generate all charts from scan history (saved to data/reports/charts/)
+python -m src.main charts
+```
+
+Produces three PNGs:
+- **Sector RRG** — rotation scatter with trailing paths (Leading / Weakening / Lagging / Improving quadrants)
+- **Sector heatmap** — score × date grid, cells annotated with daily rank
+- **Stock snapshot** — full universe RS bar chart, coloured by sector
+
 ---
 
 ## Scoring Model
@@ -181,8 +198,14 @@ data/
 │   ├── stock_ranking_history.csv
 │   ├── stock_NVDA.csv
 │   ├── watchlist_strong_frequency.csv
-│   └── watchlist_weak_frequency.csv
+│   ├── watchlist_weak_frequency.csv
+│   └── charts/
+│       ├── sector_rrg_YYYYMMDD.png
+│       ├── sector_heatmap_YYYYMMDD.png
+│       └── stock_snapshot_YYYYMMDD.png
+├── cache/               ← API response cache (auto-managed, TTL-based)
 └── logs/
+    └── scanner.log      ← diagnostic log (WARNING+ also printed to terminal)
 ```
 
 ---
@@ -195,37 +218,27 @@ src/
 ├── models/
 │   ├── universe.py          ← stock + sector symbol lists
 │   └── sector_map.py        ← stock → sector ETF mapping
-├── utils/
-│   ├── data_ingestion.py    ← Alpaca API data fetching
-│   ├── rs_engine.py         ← relative strength scoring engine
-│   ├── spot_engine.py       ← intraday momentum engine
-│   ├── logger.py            ← scan + watchlist + spot logging
-│   └── reports.py           ← historical analysis reports
-└── scheduler.py             ← optional: automated daily runs
+└── utils/
+    ├── data_ingestion.py    ← Alpaca API data fetching + caching
+    ├── rs_engine.py         ← relative strength scoring engine
+    ├── spot_engine.py       ← intraday momentum engine
+    ├── logger.py            ← scan + watchlist + spot logging
+    └── reports.py           ← historical analysis reports
+
+tests/
+└── test_rs_engine.py        ← scoring engine unit tests
 ```
 
 ---
 
 ## Scheduling (Optional)
 
-For automated daily scans, run the built-in scheduler:
-
-```bash
-# Foreground
-python -m src.scheduler
-
-# Background
-nohup python -m src.scheduler > data/logs/scheduler_nohup.log 2>&1 &
-```
-
-Runs at 4:30 PM local time, Monday–Friday. Skips weekends.
-
-Or use a crontab:
+Use a crontab for automated daily scans after market close:
 
 ```bash
 crontab -e
 # Add:
-30 16 * * 1-5 cd /path/to/RW_stock_scanner && /path/to/python -m src.main scan >> data/logs/cron.log 2>&1
+30 16 * * 1-5 cd /path/to/stock_scanner && /path/to/python -m src.main scan >> data/logs/cron.log 2>&1
 ```
 
 ---

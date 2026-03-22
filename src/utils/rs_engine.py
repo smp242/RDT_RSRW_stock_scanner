@@ -1,6 +1,7 @@
 # MODEL v1.3 — z-score normalized components
 
 from src.models.sector_map import SECTOR_MAP
+from src.models.universe import BENCHMARK
 import numpy as np
 import pandas as pd
 import logging
@@ -87,8 +88,6 @@ W_VOL_ADJ = 0.15
 W_WEEKLY  = 0.40
 W_DAILY   = 0.35
 W_HOURLY  = 0.25
-
-BENCHMARK = "SPY"
 
 
 def _collect_raw_components(stock_df: pd.DataFrame,
