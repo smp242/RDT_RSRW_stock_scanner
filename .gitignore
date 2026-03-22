@@ -35,9 +35,12 @@ env/
 .DS_Store
 
 # -------------------------
-# Data (scan results + reports)
+# Data (scan results, reports, cache, logs)
 # -------------------------
 *.csv
+*.pkl
+data/cache/
+data/logs/
 
 # -------------------------
 # Jupyter (if you ever explore)
